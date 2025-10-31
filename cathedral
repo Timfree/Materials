@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Scene Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100vh;
+            background-color: #000;
+        }
+        #loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            background-color: rgba(0,0,0,0.8);
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            font-family: monospace;
+            pointer-events: none;
+            z-index: 100;
+            border-radius: 5px;
+        }
+        #performance-toggle {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: 1px solid white;
+            padding: 8px 12px;
+            cursor: pointer;
+            z-index: 100;
+            font-family: monospace;
+            border-radius: 5px;
+        }
+        #camera-controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 10px;
+            z-index: 100;
+            font-family: monospace;
+            border-radius: 5px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .control-group label {
+            width: 120px;
+        }
+        .control-group input {
+            width: 60px;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading 3D Scene...</div>
+    </div>
+    
+    <div id="info">
+        Space: Toggle Auto-Rotation<br>
+        Left Mouse: Rotate View<br>
+        Right Mouse: Pan View<br>
+        Scroll: Zoom In/Out
+    </div>
+    
+    <button id="performance-toggle">High Quality</button>
+    
+    <div id="camera-controls">
+        <div class="control-group">
+            <label for="camera-height">Camera Height:</label>
+            <input type="range" id="camera-height" min="-3" max="3" step="0.1" value="-1.2">
+            <span id="camera-height-value">-1.2</span>
+        </div>
+        <div class="control-group">
+            <label for="target-height">Target Height:</label>
+            <input type="range" id="target-height" min="-3" max="3" step="0.1" value="1.5">
+            <span id="target-height-value">1.5</span>
+        </div>
+        <div class="control-group">
+            <label for="camera-distance">Camera Distance:</label>
+            <input type="range" id="camera-distance" min="1" max="10" step="0.1" value="3.5">
+            <span id="camera-distance-value">3.5</span>
+        </div>
+    </div>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/",
+            "@lumaai/luma-web": "https://unpkg.com/@lumaai/luma-web@0.2.0/dist/library/luma-web.module.js"
+        }
+    }
+    </script>
+    <script type="module">
+        import { 
+            WebGLRenderer, PerspectiveCamera, Scene, NoToneMapping, ACESFilmicToneMapping,
+            Vector3
+        } from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { LumaSplatsThree } from '@lumaai/luma-web';
+
+        // Performance detection
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        let highQuality = !isMobile;
+        
+        const performanceToggle = document.getElementById('performance-toggle');
+        performanceToggle.textContent = highQuality ? 'High Quality' : 'Low Quality';
+        performanceToggle.addEventListener('click', () => {
+            highQuality = !highQuality;
+            performanceToggle.textContent = highQuality ? 'High Quality' : 'Low Quality';
+            updateQuality();
+        });
+
+        function updateQuality() {
+            if (highQuality) {
+                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.toneMapping = ACESFilmicToneMapping;
+            } else {
+                renderer.setPixelRatio(1);
+                renderer.toneMapping = NoToneMapping;
+            }
+        }
+
+        // Create renderer
+        const renderer = new WebGLRenderer({ antialias: highQuality });
+        updateQuality();
+        renderer.domElement.style.position = 'absolute';
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        document.body.appendChild(renderer.domElement);
+
+        // Create camera
+        const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        // Create scene
+        const scene = new Scene();
+
+        // State - Set initial values for a strong looking-up effect
+        const state = {
+            autoRotate: true,
+            targetHeight: 1.5,  // Higher target to look up at
+            cameraHeight: -1.2, // Lower camera position to look up from
+            cameraDistance: 3.5  // Slightly further back for better perspective
+        };
+
+        // Create controls with right mouse button panning
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.autoRotate = state.autoRotate;
+        controls.autoRotateSpeed = 1.0;
+        controls.enablePan = true;
+        controls.mouseButtons = {
+            LEFT: 0,  // Left mouse button for rotation
+            MIDDLE: 1, // Middle mouse button for dolly
+            RIGHT: 2   // Right mouse button for panning
+        };
+        controls.minDistance = 1;
+        controls.maxDistance = 10;
+        
+        // Set initial target for controls
+        controls.target.set(0, state.targetHeight, 0);
+
+        // Camera controls
+        const cameraHeightSlider = document.getElementById('camera-height');
+        const cameraHeightValue = document.getElementById('camera-height-value');
+        const targetHeightSlider = document.getElementById('target-height');
+        const targetHeightValue = document.getElementById('target-height-value');
+        const cameraDistanceSlider = document.getElementById('camera-distance');
+        const cameraDistanceValue = document.getElementById('camera-distance-value');
+
+        // Set initial slider values to match state
+        cameraHeightSlider.value = state.cameraHeight;
+        cameraHeightValue.textContent = state.cameraHeight;
+        targetHeightSlider.value = state.targetHeight;
+        targetHeightValue.textContent = state.targetHeight;
+        cameraDistanceSlider.value = state.cameraDistance;
+        cameraDistanceValue.textContent = state.cameraDistance;
+
+        cameraHeightSlider.addEventListener('input', (e) => {
+            state.cameraHeight = parseFloat(e.target.value);
+            cameraHeightValue.textContent = state.cameraHeight;
+            setupCamera();
+        });
+
+        targetHeightSlider.addEventListener('input', (e) => {
+            state.targetHeight = parseFloat(e.target.value);
+            targetHeightValue.textContent = state.targetHeight;
+            setupCamera();
+        });
+
+        cameraDistanceSlider.addEventListener('input', (e) => {
+            state.cameraDistance = parseFloat(e.target.value);
+            cameraDistanceValue.textContent = state.cameraDistance;
+            setupCamera();
+        });
+
+        // Space key to toggle animation
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                state.autoRotate = !state.autoRotate;
+                controls.autoRotate = state.autoRotate;
+            }
+        });
+
+        // Configure the scene source - replace with your desired Luma scene
+        const sceneSource = 'https://lumalabs.ai/capture/8df4f922-59d6-484e-a53e-0567310bd5b7';
+        
+        // Helper function to disable MSAA
+        function disableMSAA(target) {
+            if (target) {
+                target.samples = 0;
+            }
+        }
+
+        // Create the 3D scene
+        const splat = new LumaSplatsThree({
+            source: sceneSource,
+            loadingAnimationEnabled: false,
+            onBeforeRender: (renderer) => {
+                const renderTarget = renderer.getRenderTarget();
+                disableMSAA(renderTarget);
+            }
+        });
+        
+        // Add the splat to the scene
+        scene.add(splat);
+        
+        // Set up camera position for looking upward
+        function setupCamera() {
+            // Position camera lower than the target to look upward
+            camera.position.set(
+                0,
+                state.cameraHeight,
+                state.cameraDistance
+            );
+            
+            // Look at a point higher than the camera
+            controls.target.set(0, state.targetHeight, 0);
+            controls.update();
+        }
+        
+        // Handle scene loading
+        splat.onLoad = () => {
+            // Hide loading screen
+            document.getElementById('loading').style.display = 'none';
+            
+            // Capture environment map for lighting
+            splat.captureCubemap(renderer).then((cubemap) => {
+                scene.environment = cubemap;
+                scene.background = cubemap;
+            });
+            
+            // Center the scene
+            splat.centerAndScale();
+            
+            // Set up camera with initial raking upward view
+            setupCamera();
+        };
+
+        // Main animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update controls
+            controls.update();
+            
+            // Render scene
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        window.addEventListener('resize', onWindowResize);
+        onWindowResize();
+
+        // Start animation loop
+        animate();
+    </script>
+</body>
+</html>
