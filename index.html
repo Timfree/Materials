@@ -150,14 +150,10 @@
 
         // World sources - select fewer worlds for mobile
         const allWorldSources = [
-            // Chateau de Menthon - Annecy @Yannick_Cerrutti 
-            { source: 'https://lumalabs.ai/capture/da82625c-9c8d-4d05-a9f7-3367ecab438c', scale: 1 },
-            // Arosa Hörnli - Switzerland @splnlss
-            { source: 'https://lumalabs.ai/capture/4da7cf32-865a-4515-8cb9-9dfc574c90c2', scale: 1 },
-            // Fish reefs – Okinawa @BBCG
-            { source: 'https://lumalabs.ai/capture/6331c1bb-3352-4c8e-b691-32b9b70ec768', scale: 1 },
-            // Metropolis @fotozhora_sk
-            { source: 'https://lumalabs.ai/capture/d2d2badd-8bdd-4874-84f7-9df2aae27f29', scale: 1 },
+            // day - greenheart @Yangbo 
+            { source: 'https://lumalabs.ai/capture/627686d7-396d-4924-898d-9f4750c756a1', scale: 1 },
+            // snow - greenheart @Yangbo
+            { source: 'https://lumalabs.ai/capture/8ce1363c-1d4c-463d-bd9e-91f9d12259c3', scale: 1 },
         ];
         
         const worldSources = isMobile ? allWorldSources.slice(0, 2) : allWorldSources;
@@ -298,7 +294,7 @@
             requestAnimationFrame(animate);
             
             const t_ms = performance.now();
-            const dt_s = (t_ms - lastFrameTime_ms) / 1000;
+            const dt_s = (t_ms - lastFrameTime_ms) / 1500;
             lastFrameTime_ms = t_ms;
 
             // Update controls
