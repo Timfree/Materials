@@ -133,7 +133,8 @@
 
         // Create camera
         const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.y = 3;
+        camera.position.set(10, 3, 3);
+        camera.lookAt(0, 0, 0);
 
         // Create scene
         const scene = new Scene();
@@ -159,9 +160,9 @@
         const worldSources = isMobile ? allWorldSources.slice(0, 2) : allWorldSources;
 
         // Globe parameters
-        const innerGlobeRadius = 1;
-        const outerGlobeRadius = 8;
-        const radiusGap = outerGlobeRadius - innerGlobeRadius;
+        const innerGlobeRadius = 0.5;
+        const outerGlobeRadius = 1;
+        const radiusGap = 5;
 
         // State
         const state = {
@@ -392,7 +393,7 @@
             );
             
             const s = 1 - cameraU;
-            glassGlobe.scale.setScalar(MathUtils.smootherstep(s, 0.0, 0.2));
+            glassGlobe.scale.setScalar(MathUtils.smootherstep(s, 0.0, 0.2)* 0);
             glassGlobe.updateMatrix();
             glassGlobe.updateMatrixWorld();
 
