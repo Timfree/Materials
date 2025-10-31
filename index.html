@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Nested Worlds</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100vh;
+            background-color: #000;
+        }
+        #loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            background-color: rgba(0,0,0,0.8);
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            font-family: monospace;
+            pointer-events: none;
+            z-index: 100;
+            border-radius: 5px;
+        }
+        #performance-toggle {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: 1px solid white;
+            padding: 8px 12px;
+            cursor: pointer;
+            z-index: 100;
+            font-family: monospace;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading 3D Worlds...</div>
+    </div>
+    
+    <div id="info">
+        Space: Toggle Animation<br>
+        Mouse: Drag to Look Around
+    </div>
+    
+    <button id="performance-toggle">High Quality</button>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/",
+            "@lumaai/luma-web": "https://unpkg.com/@lumaai/luma-web@0.2.0/dist/library/luma-web.module.js",
+            "lil-gui": "https://unpkg.com/lil-gui@0.18.2/dist/lil-gui.esm.js"
+        }
+    }
+    </script>
+    <script type="module">
+        import { 
+            WebGLRenderer, PerspectiveCamera, Scene, Vector3, SphereGeometry, Mesh, 
+            MeshPhysicalMaterial, FrontSide, MathUtils, NoToneMapping, LinearToneMapping,
+            CineonToneMapping, ReinhardToneMapping, ACESFilmicToneMapping, WebGLRenderTarget,
+            CubeTexture
+        } from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { LumaSplatsThree } from '@lumaai/luma-web';
+        import GUI from 'lil-gui';
+
+        // Performance detection
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        let highQuality = !isMobile;
+        
+        const performanceToggle = document.getElementById('performance-toggle');
+        performanceToggle.textContent = highQuality ? 'High Quality' : 'Low Quality';
+        performanceToggle.addEventListener('click', () => {
+            highQuality = !highQuality;
+            performanceToggle.textContent = highQuality ? 'High Quality' : 'Low Quality';
+            updateQuality();
+        });
+
+        function updateQuality() {
+            if (highQuality) {
+                renderer.setPixelRatio(window.devicePixelRatio);
+            } else {
+                renderer.setPixelRatio(1);
+            }
+        }
+
+        // Create renderer
+        const renderer = new WebGLRenderer({ antialias: highQuality });
+        updateQuality();
+        renderer.toneMapping = NoToneMapping;
+        renderer.localClippingEnabled = false;
+        renderer.domElement.style.position = 'absolute';
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        document.body.appendChild(renderer.domElement);
+
+        // Create camera
+        const camera = new PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.y = 3;
+
+        // Create scene
+        const scene = new Scene();
+
+        // Create controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enablePan = false;
+        controls.enableDamping = true;
+        controls.autoRotate = false;
+
+        // Create GUI
+        const gui = new GUI();
+        gui.close(); // Start with closed GUI
+
+        // World sources - select fewer worlds for mobile
+        const allWorldSources = [
+            // Chateau de Menthon - Annecy @Yannick_Cerrutti 
+            { source: 'https://lumalabs.ai/capture/da82625c-9c8d-4d05-a9f7-3367ecab438c', scale: 1 },
+            // Arosa Hörnli - Switzerland @splnlss
+            { source: 'https://lumalabs.ai/capture/4da7cf32-865a-4515-8cb9-9dfc574c90c2', scale: 1 },
+            // Fish reefs – Okinawa @BBCG
+            { source: 'https://lumalabs.ai/capture/6331c1bb-3352-4c8e-b691-32b9b70ec768', scale: 1 },
+            // Metropolis @fotozhora_sk
+            { source: 'https://lumalabs.ai/capture/d2d2badd-8bdd-4874-84f7-9df2aae27f29', scale: 1 },
+        ];
+        
+        const worldSources = isMobile ? allWorldSources.slice(0, 2) : allWorldSources;
+
+        // Globe parameters
+        const innerGlobeRadius = 1;
+        const outerGlobeRadius = 8;
+        const radiusGap = outerGlobeRadius - innerGlobeRadius;
+
+        // State
+        const state = {
+            level: 0,
+            innerSplatIndex: NaN,
+            outerSplatIndex: NaN,
+            animate: true,
+            worldsLoaded: 0,
+            totalWorlds: worldSources.length
+        };
+
+        // Add GUI controls
+        gui.add(renderer, 'toneMappingExposure', 0, 10).name('Exposure');
+        gui.add(renderer, 'toneMapping', {
+            NoToneMapping,
+            LinearToneMapping,
+            CineonToneMapping,
+            ReinhardToneMapping,
+            ACESFilmicToneMapping,
+        }).name('Tone Mapping');
+        gui.add(state, 'animate').name('Animate');
+
+        // Space key to toggle animation
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                state.animate = !state.animate;
+            }
+        });
+
+        // Add a refractive transmissive sphere
+        const glassGlobe = new Mesh(
+            new SphereGeometry(1, 32, 32),
+            new MeshPhysicalMaterial({
+                roughness: 0,
+                metalness: 0,
+                transparent: true,
+                transmission: 1,
+                ior: 1.341,
+                thickness: 2,
+                envMapIntensity: 1.2,
+                clearcoat: 1,
+                side: FrontSide,
+            })
+        );
+        const initialMaterialProperties = { ...glassGlobe.material };
+        
+        // Add material controls to GUI
+        function addMaterial(gui, material, name) {
+            const folder = gui.addFolder(name);
+            folder.add(material, 'roughness', 0, 1);
+            folder.add(material, 'metalness', 0, 1);
+            folder.add(material, 'transmission', 0, 1);
+            folder.add(material, 'ior', 1, 2.333);
+            folder.add(material, 'thickness', 0, 5);
+            folder.add(material, 'envMapIntensity', 0, 3);
+            folder.add(material, 'clearcoat', 0, 1);
+            folder.add(material, 'transparent');
+            folder.add(material, 'opacity', 0, 1);
+            return folder;
+        }
+        
+        addMaterial(gui, glassGlobe.material, 'Glass Globe');
+        gui.add(glassGlobe, 'renderOrder', -1, 1).step(1);
+        
+        glassGlobe.scale.setScalar(innerGlobeRadius);
+        scene.add(glassGlobe);
+
+        // Helper function to disable MSAA
+        function disableMSAA(target) {
+            if (target) {
+                target.samples = 0;
+            }
+        }
+
+        // Create splat worlds
+        const splatWorlds = worldSources.map((world, index) => {
+            const splat = new LumaSplatsThree({
+                source: world.source,
+                loadingAnimationEnabled: false,
+                onBeforeRender: (renderer) => {
+                    const renderTarget = renderer.getRenderTarget();
+                    disableMSAA(renderTarget);
+
+                    const isWithinGlobe = state.innerSplatIndex === index;
+                    const isCubeRenderTarget = (renderTarget?.texture)?.isCubeTexture === true;
+                    
+                    if (isCubeRenderTarget) {
+                        splat.preventDraw = false;
+                    } else {
+                        if (isWithinGlobe) {
+                            splat.preventDraw = renderTarget == null;
+                        } else {
+                            splat.preventDraw = renderTarget != null;
+                        }
+                    }
+                }
+            });
+            
+            splat.scale.setScalar(world.scale);
+            
+            const splatWorld = {
+                environmentMap: null,
+                splat,
+            };
+
+            // Capture environment lighting after load
+            splat.onLoad = () => {
+                state.worldsLoaded++;
+                
+                // Hide loading screen when all worlds are loaded
+                if (state.worldsLoaded >= state.totalWorlds) {
+                    document.getElementById('loading').style.display = 'none';
+                }
+                
+                splat.captureCubemap(renderer).then((cubemap) => {
+                    splatWorld.environmentMap = cubemap;
+                });
+            };
+
+            return splatWorld;
+        });
+
+        // Position camera
+        camera.position.setLength(innerGlobeRadius + radiusGap * 0.25);
+
+        // Main loop
+        let lastFrameTime_ms = performance.now();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const t_ms = performance.now();
+            const dt_s = (t_ms - lastFrameTime_ms) / 1000;
+            lastFrameTime_ms = t_ms;
+
+            // Update controls
+            controls.update();
+
+            // Handle animation
+            if (state.animate) {
+                const cameraRadialVector = camera.position.clone().normalize();
+                camera.position.addScaledVector(cameraRadialVector, dt_s);
+                camera.position.applyAxisAngle(new Vector3(0, 1, 0), dt_s * 0.5);
+                camera.lookAt(new Vector3(0, 0, 0));
+            }
+
+            // Check if camera's near plane is inside the globe
+            camera.updateWorldMatrix(true, false);
+            const near = camera.near;
+            const nearPlaneDistanceToCenter = camera.position.length() - near;
+            let innerSurfaceDistance = nearPlaneDistanceToCenter - innerGlobeRadius;
+
+            // Function to apply camera modulo
+            function applyCameraModulo() {
+                const newInnerSurfaceDistance = MathUtils.euclideanModulo(innerSurfaceDistance, radiusGap);
+                const newCameraDistance = newInnerSurfaceDistance + innerGlobeRadius + near;
+                camera.position.setLength(newCameraDistance);
+                innerSurfaceDistance = newInnerSurfaceDistance;
+                camera.updateWorldMatrix(true, false);
+            }
+
+            // Handle level transitions
+            if (innerSurfaceDistance > radiusGap) {
+                applyCameraModulo();
+                state.level++;
+            }
+
+            if (innerSurfaceDistance < 0) {
+                applyCameraModulo();
+                state.level--;
+            }
+
+            // Determine camera position in the range [0, 1]
+            const cameraU = innerSurfaceDistance / radiusGap;
+
+            // Use level to set scene state
+            state.innerSplatIndex = MathUtils.euclideanModulo(state.level - 1, splatWorlds.length);
+            state.outerSplatIndex = MathUtils.euclideanModulo(state.level, splatWorlds.length);
+
+            // Update splat worlds
+            for (let i = 0; i < splatWorlds.length; i++) {
+                const splatWorld = splatWorlds[i];
+                const splat = splatWorld.splat;
+
+                const isInnerSplat = state.innerSplatIndex === i;
+                const isOuterSplat = state.outerSplatIndex === i;
+                const isVisible = isInnerSplat || isOuterSplat;
+                
+                // Configure splat for rendering
+                splat.enableThreeShaderIntegration = isInnerSplat;
+                splat.material.transparent = !isInnerSplat;
+
+                // Add or remove from scene
+                if (isVisible) {
+                    scene.add(splat);
+                } else {
+                    scene.remove(splat);
+                }
+
+                // Set environment map
+                if (isOuterSplat && splatWorld.environmentMap) {
+                    if (scene.environment != splatWorld.environmentMap) {
+                        scene.environment = splatWorld.environmentMap;
+                        scene.background = splatWorld.environmentMap;
+                    }
+                }
+
+                // Scale the inner splat for continuity
+                if (isInnerSplat) {
+                    const r = innerGlobeRadius / outerGlobeRadius;
+                    splat.scale.setScalar(r);
+                } else {
+                    splat.scale.setScalar(1);
+                }
+
+                // Update matrices
+                if (isVisible) {
+                    splat.updateMatrix();
+                    splat.updateMatrixWorld();
+                }
+            }
+
+            // Adjust globe thickness and scale
+            glassGlobe.material.thickness = MathUtils.lerp(
+                initialMaterialProperties.thickness, 
+                0, 
+                MathUtils.smoothstep(0.2, 0, innerSurfaceDistance)
+            );
+            
+            const s = 1 - cameraU;
+            glassGlobe.scale.setScalar(MathUtils.smootherstep(s, 0.0, 0.2));
+            glassGlobe.updateMatrix();
+            glassGlobe.updateMatrixWorld();
+
+            // Render scene
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        window.addEventListener('resize', onWindowResize);
+        onWindowResize();
+
+        // Start animation loop
+        animate();
+    </script>
+</body>
+</html>
